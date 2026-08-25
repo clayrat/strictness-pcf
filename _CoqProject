@@ -1,0 +1,16 @@
+-Q theories PCF
+
+theories/FiniteOrder.v
+theories/Ty.v
+theories/Syntax.v
+theories/Context.v
+theories/Typing.v
+theories/Checker.v
+theories/Subst.v
+theories/Semantics.v
+theories/Safety.v
+theories/Strictness.v
+theories/Stabilization.v
+theories/AnalysisCorrectness.v
+theories/Examples.v
+theories/Tests.v
