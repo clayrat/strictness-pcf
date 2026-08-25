@@ -24,6 +24,7 @@ denotational semantics and adequacy theorem remain future work.
 |---|---|
 | raw syntax and declarative typing `Γ ⊢ t ∈ A` | formalized |
 | bidirectional `infer` / `check` and OCaml extraction | formalized |
+| native OCaml surface parser | unverified convenience layer |
 | CBN small-step `step`, `evalFuel`, and type safety | formalized |
 | operational approximations and observations | formalized |
 | compositional denotational semantics and adequacy | described, not mechanized |
@@ -66,8 +67,9 @@ deliberately *not* part of that build: it is a standalone driver that runs
 | `AnalysisSoundness.v` | The mutual `logical_fundamental` theorem connecting checked terms to `aeval`, its closed-term specialization, and the end-to-end `certified_strict_sound` theorem for the public Boolean query. |
 | `Examples.v` | `add`, `mul`, `fact` (with `fact_body` named), both Ωs, `loop`, `slow`, the approximant family `fact_approx k = fact_body^k(Ω)`, and the typing / untypability theorems about them. |
 | `Tests.v` | Executable checker, evaluator, and analyser cases frozen as `reflexivity`, plus inductive totality/divergence proofs that no finite run could establish: the factorial-approximant region and operational witnesses for every positive strictness claim. |
-| `extraction/Extract.v` | Extraction driver: `nat` ↦ `int`, `string` ↦ native OCaml strings, then `Extraction "checker.ml" infer check subst step evalFuel analyse certified_strict …`. |
-| `extraction/main.ml` | The OCaml demo: pretty-printers and result tables for the checker, evaluator, and strictness analyser. Ends in `assert`s that agree with `Tests.v`, including rejection of a wrong-typed strictness query. |
+| `extraction/Extract.v` | Extraction driver: `nat` ↦ `int`, `string` ↦ native OCaml strings, then `Extraction "pcf.ml" infer check subst step evalFuel analyse certified_strict …`. |
+| `extraction/parser.ml` | A handwritten, unverified parser from a small ASCII/Unicode surface syntax into raw extracted `Pcf.term` values, with positioned errors. Typing remains the extracted checker's responsibility. |
+| `extraction/main.ml` | The OCaml demo: pretty-printers and result tables for the parser, checker, evaluator, and strictness analyser. Ends in `assert`s that agree with `Tests.v`, including rejection of a wrong-typed strictness query. |
 
 ## Three core design decisions
 
@@ -282,16 +284,32 @@ let rec infer g t = match t with
 | _ -> Err (E_NoSynth t)
 ```
 
-`make -C extraction` regenerates `checker.ml` and runs `main.ml`, which prints
+`make -C extraction` regenerates `pcf.ml` and runs `main.ml`, which prints
 the checker results: `fact` checks, Ω synthesizes ℕ, the untyped Ω is rejected with
 *cannot synthesize a type for δ*, `succ (λx. x)` with *λx. x is a function, but ℕ
 was expected*, and `(λf. f 0 : (ℕ → ℕ) → ℕ) 3` with *3: expected ℕ → ℕ, got ℕ* —
-the argument blamed, not the application. There is no parser: the driver builds
-terms with the extracted constructors, which is also a small demonstration that
-the extracted API is usable OCaml.
+the argument blamed, not the application.
 
-Every line the driver prints is frozen independently in `Tests.v` as a
-kernel-checked `reflexivity`, error messages included.
+The native `Parser.parse` function additionally translates a small surface
+language into raw `Pcf.term` values:
+
+```text
+type ::= Nat | (type) | type -> type
+term ::= fun x -> term | ifz term then term else term | term : type
+       | term term | succ term | pred term | fix[type] term
+       | x | n | (term)
+```
+
+Application associates left, type arrows associate right, and annotations have
+the lowest precedence. `lambda`/`λ`, `Nat`/`ℕ`, and `->`/`→`/`⇒` are accepted
+spellings. Parsing returns either a raw term or an error with line and column;
+it establishes neither scoping nor typing. The demo therefore passes parsed
+terms to the extracted checker before treating them as programs.
+
+The results on Coq-defined examples are frozen independently in `Tests.v` as
+kernel-checked computations. The parser and its native examples are explicitly
+outside that guarantee: they are executable smoke tests for the unverified
+front end.
 
 ## Call-by-name evaluation and type safety
 

@@ -15,6 +15,6 @@
 .nia.cache
 
 # OCaml extraction
-extraction/checker.ml
-extraction/checker.mli
+extraction/pcf.ml
+extraction/pcf.mli
 extraction/_build/

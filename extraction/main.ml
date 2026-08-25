@@ -1,6 +1,6 @@
 (* Driver for the extracted PCF type checker, evaluator, and analyser.
 
-   Runs the *extracted* [infer]/[check], [evalFuel], and [analyse] (checker.ml,
+   Runs the *extracted* [infer]/[check], [evalFuel], and [analyse] (pcf.ml,
    generated from Extract.v) on representative cases and prints what the
    algorithms answer — including errors, stuck reports, and finite abstract
    function tables.
@@ -9,7 +9,7 @@
    it prints is also frozen as a kernel-checked [reflexivity] in
    theories/Tests.v, so the two agree by construction. *)
 
-open Checker
+open Pcf
 
 (* ------------------------------------------------------------------ *)
 (* Printing                                                            *)
@@ -97,6 +97,11 @@ let check_row name t a note =
   row (Printf.sprintf "check  %s : %s" name (pp_ty a)) (pp_check t a) note
 
 let nn = Tarr (Tnat, Tnat)
+
+let parse_or_fail source =
+  match Parser.parse source with
+  | Result.Ok term -> term
+  | Result.Error error -> failwith (Parser.string_of_error error)
 
 let () =
   print_endline
@@ -190,6 +195,52 @@ let () =
   an_row "loop" loop nn "certified strict — and truly: loop Ω diverges";
   an_row "λx. loop 0" blind nn "unknown — yet provably strict: the abstraction forgot 0";
 
+  let cert_row name t note =
+    row ("certify  " ^ name) (string_of_bool (certified_strict t)) note
+  in
+  section "Guarded strictness certificates";
+  cert_row "λx. succ x" strict_succ "true: certified strict";
+  cert_row "fact" fact "true: certified strict";
+  cert_row "λx. 0" const_zero "false: well typed, but not strict";
+  cert_row "λx. loop 0" blind "false: strict, but beyond this abstraction";
+  cert_row "Ω" omega "false: rejected by the ℕ → ℕ type guard";
+  cert_row "unbound" (Tvar "unbound") "false: rejected by the checker";
+
+  (* The parser is an unverified convenience layer. These terms enter the
+     verified pipeline only once [infer], [check], or [certified_strict]
+     accepts the raw syntax tree it produced. *)
+  section "Parsed source: unverified front end, verified algorithms";
+  let parsed_double =
+    parse_or_fail "((fun n -> succ (succ n)) : Nat -> Nat) 3"
+  in
+  row "parse  double 3" (pp parsed_double) "ASCII source to a raw PCF term";
+  infer_row "parsed double 3" parsed_double "the extracted checker accepts it";
+  eval_row 10 "parsed double 3" parsed_double "then the extracted evaluator returns 5";
+
+  let parsed_flagship =
+    parse_or_fail
+      "((fun x -> 0) : Nat -> Nat) (fix[Nat] (fun x -> x))"
+  in
+  infer_row "parsed CBN example" parsed_flagship "the parsed term has type ℕ";
+  eval_row 3 "parsed CBN example" parsed_flagship "the divergent argument is untouched";
+
+  let parsed_ifz = parse_or_fail "ifz pred 1 then 7 else 9" in
+  check_row "parsed ifz" parsed_ifz Tnat "conditionals check against an expected type";
+  eval_row 5 "parsed ifz" parsed_ifz "pred 1 selects the zero branch";
+
+  let parsed_strict =
+    parse_or_fail "((λx. succ x) : ℕ → ℕ)"
+  in
+  an_row "parsed λx. succ x" parsed_strict nn "the parser also accepts Unicode spelling";
+  cert_row "parsed λx. succ x" parsed_strict "the guarded public query accepts it";
+
+  begin match Parser.parse "ifz 0 then 1" with
+  | Result.Ok _ -> assert false
+  | Result.Error error ->
+      row "parse  incomplete ifz" (Parser.string_of_error error)
+        "the parser reports a source position"
+  end;
+
   (* Fail the build if the extracted algorithms ever stop agreeing with
      theories/Tests.v. *)
   assert (infer [] fact = Ok nn);
@@ -208,4 +259,16 @@ let () =
   assert (certified_strict blind = false);
   assert (certified_strict omega = false);
   assert (analyse omega Tnat = AN false);
+  (* Parser: shapes and exact error positions (ASCII "->" is one token two
+     columns wide; unicode arrows are one column). *)
+  assert (Parser.parse "((fun n -> succ n) : Nat -> Nat) 0"
+          = Result.Ok (Tapp (Tann (Tlam ("n", Tsucc (Tvar "n")), nn), Tnum 0)));
+  assert (match Parser.parse "(x : Nat -> ) y" with
+          | Result.Error e ->
+              e.Parser.position.Parser.line = 1
+              && e.Parser.position.Parser.column = 13
+          | Result.Ok _ -> false);
+  assert (match Parser.parse "(x : Nat → ) y" with
+          | Result.Error e -> e.Parser.position.Parser.column = 12
+          | Result.Ok _ -> false);
   print_newline ()

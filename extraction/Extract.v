@@ -15,7 +15,7 @@
 
         coqc -Q ../theories PCF Extract.v      (run from the extraction/ dir)
 
-    which writes checker.ml / checker.mli here.
+    which writes pcf.ml / pcf.mli here.
 
     The computational entry points are [infer], [check], [subst], [step],
     [evalFuel], [analyse], and [certified_strict], together with the data and
@@ -24,9 +24,10 @@
     executable algorithms. [certified_strict] retains the type check that
     guards its analysis verdict.
 
-    There is deliberately no parser here: the OCaml driver builds terms with the
-    extracted constructors. A surface parser belongs to the native OCaml side
-    and is left for later. *)
+    There is deliberately no parser in the verified or extracted code.
+    [parser.ml] is a handwritten, unverified OCaml front end whose output is a
+    raw [term]; the extracted checker remains the trust boundary for accepting
+    that output as a well-typed program. *)
 
 From PCF Require Import Ty Syntax Context Typing Checker Subst
                         OperationalSemantics Safety Strictness Examples.
@@ -39,7 +40,7 @@ Extraction Language OCaml.
     information. Erasing the arrow indices keeps the extracted representation
     exactly the first-order [AN | AF] datatype printed by the demo. Rocq's
     safety check is conservative for the nested indexed rows, so it is disabled
-    for this declaration; the generated [checker.ml] is checked by the build
+    for this declaration; the generated [pcf.ml] is checked by the build
     to contain no [Obj.magic]. *)
 Unset Extraction SafeImplicits.
 Extraction Implicit AF [A B].
@@ -95,7 +96,7 @@ Definition ex_apply_to_three : term :=
 
 Set Extraction Output Directory ".".
 
-Extraction "checker.ml"
+Extraction "pcf.ml"
   infer check
   ty_eqb lookup
   subst step evalFuel
