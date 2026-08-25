@@ -28,8 +28,8 @@
     extracted constructors. A surface parser belongs to the native OCaml side
     and is left for later. *)
 
-From PCF Require Import Ty Syntax Context Typing Checker Subst Semantics
-                        Safety Strictness Examples.
+From PCF Require Import Ty Syntax Context Typing Checker Subst
+                        OperationalSemantics Safety Strictness Examples.
 From Stdlib Require Import String List Extraction.
 Import ListNotations.
 

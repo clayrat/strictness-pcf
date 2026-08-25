@@ -1,4 +1,4 @@
-(** * Analysis correctness: carrier closure and monotonicity
+(** * Analysis properties: carrier closure and monotonicity
 
     This is the bridge from Stabilization.v's finite order theory to the
     abstract interpreter. It proves, mutually for the bidirectional synthesis
@@ -8,8 +8,9 @@
     - is monotone in a pointwise-ordered abstract environment.
 
     Consequently every functional supplied by a well-checked program to the
-    [fix] clause satisfies the carrier premise of [afix_receipt]. Operational
-    soundness against [evalFuel] is the remaining layer. *)
+    [fix] clause satisfies the carrier premise of
+    [afix_approx_is_fixpoint]. These are the abstract-interpreter invariants
+    consumed by AnalysisSoundness.v. *)
 
 From Stdlib Require Import String Bool List Eqdep_dec.
 From Equations Require Import Equations.
@@ -123,9 +124,9 @@ Proof.
   rewrite H by apply in_eq. apply IH. intros y Hy. apply H. right. exact Hy.
 Qed.
 
-(** ** The mutual fundamental theorem *)
+(** ** Mutual carrier closure and monotonicity *)
 
-Theorem aeval_fundamental :
+Theorem aeval_respects_fundamental :
   (forall Γ t A, Γ ⊢ t ⇑ A -> forall ρ σ,
       aenv_le Γ ρ σ -> aeval_respects Γ ρ σ t A)
   /\
@@ -256,12 +257,31 @@ Qed.
 Corollary aeval_synth_respects : forall Γ t A,
   Γ ⊢ t ⇑ A -> forall ρ σ,
   aenv_le Γ ρ σ -> aeval_respects Γ ρ σ t A.
-Proof. apply aeval_fundamental. Qed.
+Proof. apply aeval_respects_fundamental. Qed.
 
 Corollary aeval_check_respects : forall Γ t A,
   Γ ⊢ t ⇓ A -> forall ρ σ,
   aenv_le Γ ρ σ -> aeval_respects Γ ρ σ t A.
-Proof. apply aeval_fundamental. Qed.
+Proof. apply aeval_respects_fundamental. Qed.
+
+(** The carrier projection alone, at the minimal hypothesis: a reflexively
+    ordered abstract environment. AnalysisSoundness.v consumes this form at
+    application, [fix] and [ifz] sites. *)
+Corollary aeval_synth_enum : forall Γ t A,
+  Γ ⊢ t ⇑ A -> forall ρ,
+  aenv_le Γ ρ ρ -> In (aeval Γ ρ t A) (enum A).
+Proof.
+  intros Γ t A Ht ρ Henv.
+  exact (proj1 (aeval_synth_respects _ _ _ Ht _ _ Henv)).
+Qed.
+
+Corollary aeval_check_enum : forall Γ t A,
+  Γ ⊢ t ⇓ A -> forall ρ,
+  aenv_le Γ ρ ρ -> In (aeval Γ ρ t A) (enum A).
+Proof.
+  intros Γ t A Ht ρ Henv.
+  exact (proj1 (aeval_check_respects _ _ _ Ht _ _ Henv)).
+Qed.
 
 Corollary aeval_synth_mono : forall Γ t A,
   Γ ⊢ t ⇑ A -> forall ρ σ,
@@ -288,11 +308,11 @@ Proof.
   exact H.
 Qed.
 
-Corollary checked_fix_receipt : forall t A,
+Corollary checked_fix_is_fixpoint : forall t A,
   [] ⊢ t ⇓ (A ⇒ A) ->
   aapply (analyse t (A ⇒ A))
     (afix_approx A (analyse t (A ⇒ A)) (dsize A)) =
   afix_approx A (analyse t (A ⇒ A)) (dsize A).
 Proof.
-  intros t A Ht. apply afix_receipt, analyse_check_enum, Ht.
+  intros t A Ht. apply afix_approx_is_fixpoint, analyse_check_enum, Ht.
 Qed.

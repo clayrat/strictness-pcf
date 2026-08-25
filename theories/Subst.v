@@ -20,7 +20,7 @@
       empty context ([check_program]), and such terms have no free variables
       ([typable_empty_closed]);
 
-    - **reduction is weak.** No rule of Semantics.v steps under a binder:
+    - **reduction is weak.** No rule of OperationalSemantics.v steps under a binder:
       the contexts the relation descends through — the head of an
       application, the operand of [succ]/[pred], the scrutinee of [ifz] —
       bind nothing. A free variable of a redex is therefore free in the
@@ -45,7 +45,7 @@
 
     β-steps by capture to [λ y, y], which does not have that type. Tests.v
     freezes both the capture and the broken preservation
-    ([capture_breaks_preservation]). Every theorem of Semantics.v and
+    ([capture_breaks_preservation]). Every theorem of OperationalSemantics.v and
     Safety.v is therefore stated in the empty context — the only case the
     evaluator's contract covers anyway.
 

@@ -15,10 +15,10 @@ the global context").
 ## Status
 
 The executable checker, evaluator, and analyser are formalized together with
-their internal correctness properties. Operational approximation results
-connect evaluation to the intended denotational reading. A compositional
-denotational semantics and the final operational soundness theorem for the
-strictness analyser remain future work.
+their correctness properties. Operational approximation results connect
+evaluation to the intended denotational reading, and the strictness analyser
+has an end-to-end operational soundness theorem. A separate compositional
+denotational semantics and adequacy theorem remain future work.
 
 | Component | Status |
 |---|---|
@@ -28,7 +28,8 @@ strictness analyser remain future work.
 | operational approximations and observations | formalized |
 | compositional denotational semantics and adequacy | described, not mechanized |
 | finite strictness domains, order theory, and analyser monotonicity | formalized |
-| operational soundness of strictness certificates | instance proofs only; the general theorem remains |
+| step-indexed operational relation and strictness bridge | formalized |
+| fundamental theorem and `certified_strict` soundness | formalized |
 
 ## Building
 
@@ -54,12 +55,15 @@ deliberately *not* part of that build: it is a standalone driver that runs
 | `Typing.v` | The judgment `Γ ⊢ t ∈ A`, named inversion lemmas, the `typecheck` tactic, weakening, and `typable_empty_closed`. |
 | `Checker.v` | The two judgments `Γ ⊢ t ⇑ A` / `Γ ⊢ t ⇓ A`, the mutually recursive `infer` / `check` with their error type, and the metatheory: soundness against `has_type`, soundness and completeness for the bidirectional judgments, uniqueness of synthesis, decidability, and `check_incomplete` for declarative typing. |
 | `Subst.v` | Non-renaming substitution `<[ x := s ]> t` (correct because the evaluator only ever substitutes closed arguments), the no-op lemmas for absent/closed terms, and `subst_typing`. |
-| `Semantics.v` | Values, the CBN relation `t --> u`, `-->*` with its congruences, the functions `step` / `evalFuel`, soundness + completeness, determinism, value monotonicity, and the operational `diverges` predicate with closure through strict contexts. |
+| `OperationalSemantics.v` | Values, the CBN relation `t --> u`, `-->*` with its congruences, the functions `step` / `evalFuel`, soundness + completeness, determinism, value monotonicity, and the operational `diverges` predicate with closure through strict contexts. |
 | `Safety.v` | Canonical forms, `progress`, `preservation`, `eval_safe` / `eval_no_stuck` / `eval_nat_numeral`, and `check_eval_contract`, which connects successful checking to safe evaluation. |
 | `Strictness.v` | The type-indexed finite domains `aval A` as *monotone* tables (`enum` filters by `monotone_tbl` — load-bearing: a non-monotone table oscillates under iteration, see `Tests.not_table_oscillates`), `abot` / `dsize`, the checking-mode abstract interpreter `aeval` with the `fix` iteration `afix_approx`, and the API `analyse` / `certified_strict`. |
 | `FiniteOrder.v` | Representation-independent order theory: carrier-scoped posets and bounded join-semilattices, the derived join algebra, and stabilization/leastness/monotonicity of finite monotone iteration. It has no dependency on PCF. |
-| `Stabilization.v` | Instantiates `FiniteOrder.v` for `aval A`: proves the canonical-table representation obligations for `aleb`, `ajoin`, `abot`, and `aapply`, establishes `enum ≤ dsize`, and exposes the specialized receipt (`afix_receipt`) and least fixpoint theorem (`afix_least`). `cval A` packages a value with its carrier proof. |
-| `AnalysisCorrectness.v` | The mutual fundamental theorem for synthesis and checking derivations: under carrier-valued pointwise-ordered environments, `aeval` returns carrier values and is monotone. Thus every checked `fix` functional satisfies the stabilization receipt's premise (`checked_fix_receipt`). |
+| `AbstractDomain.v` | The order theory of `aval A`: on the enumerated carrier, `aleb` is a decidable partial order (a mere preorder on raw tables), `aapply` is closed and monotone, `abot` least, `ajoin` the least upper bound with its derived algebra; instantiates `FiniteOrder.v`'s interfaces (`aval_finite_poset`, `aval_join_semilat`) and establishes `enum ≤ dsize`. |
+| `Stabilization.v` | The bounded-iteration fixpoint theorem on top of `AbstractDomain.v` (which it re-exports): `afix_approx_is_fixpoint`, `afix_stable`, `afix_approx_enum`/`_mono`, and the least-fixpoint theorem `afix_least`. `cval A` packages a value with its carrier proof. |
+| `AnalysisProperties.v` | The mutual carrier/monotonicity theorem for synthesis and checking derivations: under carrier-valued pointwise-ordered environments, `aeval` returns carrier values and is monotone. Thus every checked `fix` functional satisfies the stabilization theorem's premise (`checked_fix_is_fixpoint`). |
+| `LogicalRelation.v` | The cumulative step-indexed relation between `aval A` and concrete terms, its operational and order closure laws, compatibility lemmas, simultaneous closing substitutions and related environments, and natural bottom as divergence. |
+| `AnalysisSoundness.v` | The mutual `logical_fundamental` theorem connecting checked terms to `aeval`, its closed-term specialization, and the end-to-end `certified_strict_sound` theorem for the public Boolean query. |
 | `Examples.v` | `add`, `mul`, `fact` (with `fact_body` named), both Ωs, `loop`, `slow`, the approximant family `fact_approx k = fact_body^k(Ω)`, and the typing / untypability theorems about them. |
 | `Tests.v` | Executable checker, evaluator, and analyser cases frozen as `reflexivity`, plus inductive totality/divergence proofs that no finite run could establish: the factorial-approximant region and operational witnesses for every positive strictness claim. |
 | `extraction/Extract.v` | Extraction driver: `nat` ↦ `int`, `string` ↦ native OCaml strings, then `Extraction "checker.ml" infer check subst step evalFuel analyse certified_strict …`. |
@@ -410,7 +414,7 @@ price is fixed in advance: ℕ⊥ collapses to the two-point domain
 finite tables of **monotone** maps — `enum` generates all tables and filters
 them through `monotone_tbl`. The filter is load-bearing, not cosmetic: a
 non-monotone table like `{⊥↦⊤, ⊤↦⊥}` oscillates under fixpoint iteration
-(⊥, ⊤, ⊥, ⊤, …), voiding the stabilization receipt below — frozen as the
+(⊥, ⊤, ⊥, ⊤, …), invalidating the stabilization argument below — frozen as the
 negative demo `not_table_oscillates` — and the λ-tabulation would otherwise
 feed such tables into bodies, where they can reach an inner `fix`, at higher
 order. Nothing is lost by the cut: the abstraction of a concrete function is
@@ -445,15 +449,17 @@ Recursion is the finite iteration `a₀ = ⊥, a_{k+1} = F♯(a_k)`, run `dsize 
 times — the computable counterpart of ⊔ fⁿ(⊥), with no convergence test
 needed: an ascending chain in the monotone carrier (at most `dsize A`
 elements) has stabilized by then. `FiniteOrder.v` factors out the generic join
-and finite-iteration theory, while `Stabilization.v` proves that the concrete
+and finite-iteration theory; `AbstractDomain.v` proves that the concrete
 tables satisfy its carrier, order, application, and budget premises;
-`AnalysisCorrectness.v` then proves, mutually for synthesis and checking
+`Stabilization.v` derives the bounded-iteration fixpoint and least-fixpoint
+theorems from the two;
+`AnalysisProperties.v` then proves, mutually for synthesis and checking
 derivations, that `aeval` stays in that carrier and is monotone in its
 abstract environment. Consequently every functional produced at a checked
 `fix` satisfies the stabilization theorem's premise. Same iteration shape as
 `evalFuel`, opposite epistemic
 status: there the domain is infinite and fuel is a confession; here it is
-finite and `dsize` is a receipt. Extraction stays `Obj.magic`-free — `aval`
+finite and `dsize` is proved sufficient. Extraction stays `Obj.magic`-free — `aval`
 is ordinary data, so the demo *prints* abstract functions as tables.
 
 ### The verdicts (frozen in `Tests.v`, printed by `extraction/main.ml`)
@@ -481,19 +487,23 @@ exactly the forgotten information: the concrete value `0`. That same loss is
 why the analysis terminates — a finite domain is exhaustible, ℕ⊥ is not —
 and explains both its termination and its incompleteness.
 
-Soundness comes in three layers, of which the first two are now proved.
+Operational soundness follows by composing the following proved results.
 `Stabilization.v` shows that on the enumerated carrier the budgeted iteration
-provably reaches the **least fixpoint** (`afix_receipt`, `afix_least`) — the
+provably reaches the **least fixpoint** (`afix_approx_is_fixpoint`,
+`afix_least`) — the
 "terminates because the domain is finite" slogan as a theorem, with
 `not_table` marking the exact edge of its hypothesis.
-`AnalysisCorrectness.v` proves carrier closure and environment monotonicity of
-`aeval`, so that receipt now applies to every functional produced by a checked
-program. The remaining layer is the full operational statement "if
-`f♯(⊥) = ⊥` then `f` is strict" — a step-indexed logical relation against
-`evalFuel`, feasible without domain theory but still a several-hundred-line
-project. Meanwhile every positive example verdict is validated at the instance
-level by an operational divergence proof, while `certified_strict` first enforces the
-`ℕ ⇒ ℕ` typing precondition.
+`AnalysisProperties.v` proves carrier closure and environment monotonicity of
+`aeval`, so the fixpoint theorem applies to every functional produced by a
+checked program. `LogicalRelation.v` supplies the cumulative step-indexed relation,
+proves that natural bottom is exactly operational divergence, and proves
+`semantic_strict_nat`: a semantically related function whose abstract bottom
+row is bottom is operationally strict. `AnalysisSoundness.v` proves the mutual
+`logical_fundamental` theorem showing that every checked concrete term is
+related to the value computed by `aeval`; `certified_strict_sound` combines
+these results for the public Boolean query. Every positive example verdict is also
+validated at the instance level by an operational divergence proof, while
+`certified_strict` first enforces the `ℕ ⇒ ℕ` typing precondition.
 
 ### The implemented pipeline
 

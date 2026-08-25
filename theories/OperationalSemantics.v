@@ -1,4 +1,4 @@
-(** * Semantics: call-by-name small steps and the fuelled evaluator
+(** * Operational semantics: call-by-name small steps and the fuelled evaluator
 
     Everything is stated twice: once as an inductive relation [t --> u] (the
     specification), once as functions

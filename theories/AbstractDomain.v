@@ -1,0 +1,633 @@
+(** * AbstractDomain: the order theory of abstract PCF values
+
+    The finite domains 𝔻(A) of the strictness analyser, packaged as
+    mathematics: this file proves that the computational surface of
+    Strictness.v — [aval_eqb], [aleb], [enum], [abot], [ajoin], [aapply] —
+    forms a decidable bounded join-semilattice on the enumerated carrier,
+    and instantiates the representation-independent interfaces of
+    FiniteOrder.v with it ([aval_finite_poset], [aval_join_semilat]).
+
+    The carrier discipline runs through everything: [aleb] is only a
+    preorder on raw values (it ignores table keys), and becomes a partial
+    order exactly on [enum A], whose members have canonical keys,
+    carrier-valued rows, and monotone tables ([enum_arrow_inv]). Application
+    is closed and monotone on the carrier; [abot] is its least element;
+    [ajoin] its least upper bound, with the derived equational algebra
+    exported at the end. [enum_le_dsize] bounds the carrier by the
+    analyser's deliberately loose iteration budget.
+
+    Stabilization.v proves bounded fixpoint iteration on top of this file;
+    nothing here mentions iteration or semantics. *)
+
+From Stdlib Require Import String Bool List Arith Lia.
+From Equations Require Import Equations.
+Import ListNotations.
+From PCF Require Import Ty Strictness FiniteOrder.
+
+Open Scope ty_scope.
+
+(** ** Boolean equality is equality *)
+
+Lemma aval_eqb_refl : forall A (v : aval A), aval_eqb v v = true.
+Proof.
+  induction A as [| A1 IH1 A2 IH2]; intros v; dependent elimination v.
+  - destruct b; reflexivity.
+  - simp aval_eqb.
+    induction l as [| [a b] tbl IHt]; [reflexivity |].
+    simpl. rewrite IH1, IH2, IHt. reflexivity.
+Qed.
+
+Lemma aval_eqb_eq : forall A (v w : aval A), aval_eqb v w = true -> v = w.
+Proof.
+  induction A as [| A1 IH1 A2 IH2]; intros v w E;
+    dependent elimination v; dependent elimination w; simp aval_eqb in E.
+  - destruct b, b0; simpl in E; congruence.
+  - f_equal. revert l0 E.
+    induction l as [| [a b] ts IHt]; intros [| [a' b'] us] E;
+      try discriminate; [reflexivity |].
+    apply andb_prop in E as [E1 E3]. apply andb_prop in E1 as [E1 E2].
+    rewrite (IH1 _ _ E1), (IH2 _ _ E2). f_equal.
+    apply IHt, E3.
+Qed.
+
+(** ** The pointwise order: preorder in general *)
+
+Lemma aleb_refl : forall A (v : aval A), aleb v v = true.
+Proof.
+  induction A as [| A1 IH1 A2 IH2]; intros v; dependent elimination v.
+  - destruct b; reflexivity.
+  - simp aleb.
+    induction l as [| [a b] tbl IHt]; [reflexivity |].
+    simpl. rewrite IH2, IHt. reflexivity.
+Qed.
+
+Lemma aleb_trans : forall A (u v w : aval A),
+  aleb u v = true -> aleb v w = true -> aleb u w = true.
+Proof.
+  induction A as [| A1 IH1 A2 IH2]; intros u v w E1 E2;
+    dependent elimination u; dependent elimination v; dependent elimination w;
+    simp aleb in *; auto.
+  - destruct b, b0, b1; simpl in *; congruence.
+  - assert (Key : forall (ts us vs : list (aval A * aval B)),
+        table_leb (@aleb B) ts us = true ->
+        table_leb (@aleb B) us vs = true ->
+        table_leb (@aleb B) ts vs = true).
+    { clear -IH2. induction ts as [| [a b] ts' IHt]; intros us vs E1 E2.
+      - destruct us as [| p us]; simpl in *; [| discriminate].
+        destruct vs as [| q vs]; simpl in *; [reflexivity | discriminate].
+      - destruct us as [| [a2 b2] us]; simpl in *; [discriminate |].
+        destruct vs as [| [a3 b3] vs]; simpl in *; [discriminate |].
+        apply andb_prop in E1 as [E1a E1b].
+        apply andb_prop in E2 as [E2a E2b].
+        apply andb_true_intro. split.
+        + exact (IH2 _ _ _ E1a E2a).
+        + exact (IHt us vs E1b E2b). }
+    exact (Key l l0 l1 E1 E2).
+Qed.
+
+(** ** The canonical carrier
+
+    Inversion of membership in [enum]: at ℕ the two points, at an arrow a
+    monotone table whose keys are exactly [enum A₁] and whose outputs live
+    in [enum A₂]. Antisymmetry holds *on the carrier* (in general [aleb]
+    ignores keys, so it is only a preorder). *)
+
+Lemma all_tables_keys : forall (I O : Type) (ins : list I) (outs : list O)
+  (tbl : list (I * O)),
+  In tbl (all_tables ins outs) -> map fst tbl = ins.
+Proof.
+  intros I O. induction ins as [| i ins' IH]; intros outs tbl Hin; simpl in Hin.
+  - destruct Hin as [<- | []]. reflexivity.
+  - apply in_flat_map in Hin as (o & _ & Hin).
+    apply in_map_iff in Hin as (tbl' & <- & Hin').
+    simpl. f_equal. eauto.
+Qed.
+
+Lemma all_tables_outs : forall (I O : Type) (ins : list I) (outs : list O)
+  (tbl : list (I * O)),
+  In tbl (all_tables ins outs) ->
+  forall a b, In (a, b) tbl -> In b outs.
+Proof.
+  intros I O. induction ins as [| i ins' IH];
+    intros outs tbl Hin a b Hab; simpl in Hin.
+  - destruct Hin as [<- | []]. destruct Hab.
+  - apply in_flat_map in Hin as (o & Ho & Hin).
+    apply in_map_iff in Hin as (tbl' & <- & Hin').
+    destruct Hab as [E | Hab].
+    + injection E as <- <-. exact Ho.
+    + eauto.
+Qed.
+
+(** The converse used by lambda tabulation: one carrier-valued output for
+    every input is one of the tables generated by [all_tables]. *)
+Lemma all_tables_complete : forall (I O : Type) (ins : list I) (outs : list O)
+  (tbl : list (I * O)),
+  map fst tbl = ins ->
+  (forall a b, In (a, b) tbl -> In b outs) ->
+  In tbl (all_tables ins outs).
+Proof.
+  intros I O. induction ins as [| i ins IH]; intros outs tbl K Hout.
+  - destruct tbl as [| [a b] tbl]; simpl in K; [simpl; auto | discriminate].
+  - destruct tbl as [| [a b] tbl]; simpl in K; [discriminate |].
+    injection K as <- K.
+    simpl. apply in_flat_map. exists b. split.
+    + apply (Hout a b). left. reflexivity.
+    + apply in_map_iff. exists tbl. split; [reflexivity |].
+      apply IH; [exact K |].
+      intros a' b' Hin. eapply Hout. right. exact Hin.
+Qed.
+
+(** Zipping aligned canonical tables preserves their keys, and every result
+    row comes from joining the two rows at the same position. *)
+Lemma join_tables_keys : forall (I O : Type) (joinO : O -> O -> O)
+  (ts us : list (I * O)),
+  map fst ts = map fst us ->
+  map fst (join_tables joinO ts us) = map fst ts.
+Proof.
+  intros I O joinO. induction ts as [| [a b] ts IH];
+    intros [| [a' b'] us] K; simpl in *; try discriminate; [reflexivity |].
+  injection K as <- K. simpl. f_equal. apply IH, K.
+Qed.
+
+Lemma join_tables_row : forall (I O : Type) (joinO : O -> O -> O)
+  (ts us : list (I * O)) a d,
+  map fst ts = map fst us ->
+  In (a, d) (join_tables joinO ts us) ->
+  exists b c,
+    In (a, b) ts /\ In (a, c) us /\ d = joinO b c.
+Proof.
+  intros I O joinO. induction ts as [| [i b] ts IH];
+    intros [| [i' c] us] a d K Hin; simpl in *; try discriminate;
+    [destruct Hin |].
+  injection K as <- K. destruct Hin as [E | Hin].
+  - injection E as <- <-. exists b, c. repeat split; auto.
+  - destruct (IH us a d K Hin) as (b' & c' & Hb & Hc & ->).
+    exists b', c'. repeat split; auto.
+Qed.
+
+Lemma enum_arrow_inv : forall A1 A2 (F : aval (A1 ⇒ A2)),
+  In F (enum (A1 ⇒ A2)) ->
+  exists (tbl : list (aval A1 * aval A2)), F = AF tbl
+    /\ map fst tbl = enum A1
+    /\ (forall a b, In (a, b) tbl -> In b (enum A2))
+    /\ monotone_tbl tbl = true.
+Proof.
+  intros A1 A2 F Hin. simpl in Hin.
+  apply in_map_iff in Hin as (tbl & <- & Hin).
+  apply filter_In in Hin as [Hin Hmono].
+  exists tbl. repeat split; eauto using all_tables_keys, all_tables_outs.
+Qed.
+
+Lemma enum_nat_inv : forall (v : aval ℕ),
+  In v (enum ℕ) -> v = AN false \/ v = AN true.
+Proof. intros v [<- | [<- | []]]; auto. Qed.
+
+Lemma aleb_antisym_enum : forall A (u v : aval A),
+  In u (enum A) -> In v (enum A) ->
+  aleb u v = true -> aleb v u = true -> u = v.
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros u v Hu Hv E1 E2.
+  - destruct (enum_nat_inv _ Hu) as [-> | ->];
+      destruct (enum_nat_inv _ Hv) as [-> | ->].
+    + reflexivity.
+    + change (false = true) in E2. discriminate.
+    + change (false = true) in E1. discriminate.
+    + reflexivity.
+  - destruct (enum_arrow_inv _ _ _ Hu) as (ts & -> & Ku & Ou & _).
+    destruct (enum_arrow_inv _ _ _ Hv) as (us & -> & Kv & Ov & _).
+    f_equal.
+    assert (K : map fst ts = map fst us) by congruence.
+    clear Hu Hv Ku Kv.
+    revert us K Ov E1 E2.
+    induction ts as [| [a b] ts' IHt];
+      intros [| [a' b'] us] K Ov E1 E2; simp aleb in *;
+      try discriminate; [reflexivity |].
+    injection K as <- K.
+    apply andb_prop in E1 as [E1h E1t]. apply andb_prop in E2 as [E2h E2t].
+    assert (Hb : In b (enum A2)) by (eapply Ou; left; reflexivity).
+    assert (Hb' : In b' (enum A2)) by (eapply Ov; left; reflexivity).
+    rewrite (IH2 b b' Hb Hb' E1h E2h).
+    f_equal. apply IHt; eauto using in_cons.
+Qed.
+
+(** The abstract domain at each PCF type, viewed through the generic finite
+    order interface. The rest of this file proves that its concrete table
+    operations inhabit the corresponding join and iteration structures. *)
+Definition aval_finite_poset (A : ty) : finite_poset (aval A).
+Proof.
+  refine {| finite_carrier := enum A;
+            finite_eqb := aval_eqb;
+            finite_leb := aleb |}.
+  - apply aval_eqb_refl.
+  - intros. eapply aval_eqb_eq; eauto.
+  - apply aleb_refl.
+  - intros. eapply aleb_trans; eauto.
+  - intros. eapply aleb_antisym_enum; eauto.
+Defined.
+
+Definition aval_poset (A : ty) : carrier_poset (aval A) :=
+  finite_carrier_poset (aval_finite_poset A).
+
+(** ** Application on the carrier: total, closed, monotone *)
+
+Lemma find_key : forall A B (tbl : list (aval A * aval B)) (v : aval A),
+  In v (map fst tbl) ->
+  exists o, find (fun p : aval A * aval B => aval_eqb (fst p) v) tbl
+            = Some (v, o)
+            /\ In (v, o) tbl.
+Proof.
+  intros A B. induction tbl as [| [a b] tbl' IH]; intros v Hin;
+    [destruct Hin |].
+  simpl in *. destruct (aval_eqb a v) eqn:E.
+  - apply aval_eqb_eq in E as <-. eauto.
+  - destruct Hin as [<- | Hin].
+    + rewrite aval_eqb_refl in E. discriminate.
+    + destruct (IH _ Hin) as (o & Hf & Ho). eauto.
+Qed.
+
+Lemma aapply_row : forall A B (tbl : list (aval A * aval B)) (v : aval A),
+  In v (map fst tbl) -> In (v, aapply (AF tbl) v) tbl.
+Proof.
+  intros A B tbl v Hin.
+  destruct (find_key A B tbl v Hin) as (o & Hf & Ho).
+  simp aapply. rewrite Hf. exact Ho.
+Qed.
+
+(** Looking up an input in a table built by tabulation returns the value at
+    that input. No uniqueness premise is needed: every occurrence of the same
+    input is paired with the same result. *)
+Lemma aapply_tabulate : forall A B (f : aval A -> aval B) xs (d : aval A),
+  In d xs ->
+  aapply (AF (map (fun v => (v, f v)) xs)) d = f d.
+Proof.
+  intros A B f xs. induction xs as [| a xs IH]; intros d Hin;
+    simpl in Hin; [contradiction |].
+  simp aapply. cbn [find]. simpl. destruct (aval_eqb a d) eqn:E.
+  - apply aval_eqb_eq in E. subst a. reflexivity.
+  - change (aapply (AF (map (fun v => (v, f v)) xs)) d = f d).
+    apply IH. destruct Hin as [<- | Hin].
+    + rewrite aval_eqb_refl in E. discriminate.
+    + exact Hin.
+Qed.
+
+Lemma aapply_enum : forall A B (F : aval (A ⇒ B)) (v : aval A),
+  In F (enum (A ⇒ B)) -> In v (enum A) -> In (aapply F v) (enum B).
+Proof.
+  intros A B F v HF Hv.
+  destruct (enum_arrow_inv _ _ _ HF) as (tbl & -> & K & O & _).
+  eapply O, aapply_row. rewrite K. exact Hv.
+Qed.
+
+Lemma aapply_mono : forall A B (F : aval (A ⇒ B)) (u v : aval A),
+  In F (enum (A ⇒ B)) -> In u (enum A) -> In v (enum A) ->
+  aleb u v = true ->
+  aleb (aapply F u) (aapply F v) = true.
+Proof.
+  intros A B F u v HF Hu Hv Huv.
+  destruct (enum_arrow_inv _ _ _ HF) as (tbl & -> & K & _ & M).
+  assert (Ru : In (u, aapply (AF tbl) u) tbl)
+    by (apply aapply_row; rewrite K; exact Hu).
+  assert (Rv : In (v, aapply (AF tbl) v) tbl)
+    by (apply aapply_row; rewrite K; exact Hv).
+  unfold monotone_tbl in M.
+  rewrite forallb_forall in M.
+  specialize (M _ Ru). rewrite forallb_forall in M.
+  specialize (M _ Rv). simpl in M. rewrite Huv in M. exact M.
+Qed.
+
+(** Application is also monotone in the function table itself. *)
+Lemma aapply_fun_mono : forall A B (F G : aval (A ⇒ B)) (v : aval A),
+  In F (enum (A ⇒ B)) -> In G (enum (A ⇒ B)) ->
+  In v (enum A) -> aleb F G = true ->
+  aleb (aapply F v) (aapply G v) = true.
+Proof.
+  intros A B F G v HF HG Hv EFG.
+  destruct (enum_arrow_inv _ _ _ HF) as (ts & -> & Kt & _ & _).
+  destruct (enum_arrow_inv _ _ _ HG) as (us & -> & Ku & _ & _).
+  assert (K : map fst ts = map fst us) by congruence.
+  rewrite <- Kt in Hv. simp aleb in EFG. clear HF HG Kt Ku.
+  revert us v Hv K EFG. induction ts as [| [a b] ts IH];
+    intros [| [a' b'] us] v Hv K EFG; simpl in *; try discriminate.
+  - destruct Hv.
+  - injection K as <- K. apply andb_prop in EFG as [Ehead Etail].
+    simp aapply. destruct (aval_eqb a v) eqn:Eav.
+    + cbn [find]. simpl. rewrite Eav. exact Ehead.
+    + cbn [find]. simpl. rewrite Eav.
+      change (aleb (aapply (AF ts) v) (aapply (AF us) v) = true).
+      apply IH with (us := us); try assumption.
+      destruct Hv as [<- | Hv].
+      * rewrite aval_eqb_refl in Eav. discriminate.
+      * exact Hv.
+Qed.
+
+(** ** ⊥ is in the carrier and below it *)
+
+Lemma const_in_all_tables : forall (I O : Type) (ins : list I)
+  (outs : list O) (o : O),
+  In o outs -> In (map (fun i => (i, o)) ins) (all_tables ins outs).
+Proof.
+  intros I O. induction ins as [| i ins' IH]; intros outs o Ho; simpl; [auto |].
+  apply in_flat_map. exists o. split; [exact Ho |].
+  apply in_map_iff. eauto.
+Qed.
+
+Lemma abot_enum : forall A, In (abot A) (enum A).
+Proof.
+  induction A as [| A1 _ A2 IH2]; simpl; [auto |].
+  apply in_map_iff. exists (map (fun i => (i, abot A2)) (enum A1)).
+  split; [reflexivity |].
+  apply filter_In. split; [apply const_in_all_tables, IH2 |].
+  unfold monotone_tbl. rewrite forallb_forall. intros [a b] Hab.
+  rewrite forallb_forall. intros [a' b'] Hab'.
+  apply in_map_iff in Hab as (i & E & _). injection E as <- <-.
+  apply in_map_iff in Hab' as (i' & E' & _). injection E' as <- <-.
+  simpl. destruct (aleb i i'); [apply aleb_refl | reflexivity].
+Qed.
+
+Lemma abot_least : forall A (v : aval A),
+  In v (enum A) -> aleb (abot A) v = true.
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros v Hv.
+  - destruct (enum_nat_inv _ Hv) as [-> | ->]; reflexivity.
+  - destruct (enum_arrow_inv _ _ _ Hv) as (tbl & -> & K & O & _).
+    cbn [abot]. simp aleb. rewrite <- K. clear Hv K.
+    induction tbl as [| [a b] tbl' IHt]; [reflexivity |].
+    simpl. rewrite IH2; [| eapply O; left; reflexivity]. simpl.
+    apply IHt. intros a' b' Hin. eapply O. right. exact Hin.
+Qed.
+
+(** ** Join on the carrier
+
+    [ajoin] is pointwise join on canonical tables. The carrier hypotheses are
+    essential: outside [enum], tables need not have aligned rows. *)
+
+Lemma ajoin_left : forall A (u v : aval A),
+  In u (enum A) -> In v (enum A) -> aleb u (ajoin u v) = true.
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros u v Hu Hv.
+  - destruct (enum_nat_inv _ Hu) as [-> | ->];
+      destruct (enum_nat_inv _ Hv) as [-> | ->]; reflexivity.
+  - destruct (enum_arrow_inv _ _ _ Hu) as (ts & -> & Kt & Ot & _).
+    destruct (enum_arrow_inv _ _ _ Hv) as (us & -> & Ku & Ou & _).
+    simp ajoin aleb. assert (K : map fst ts = map fst us) by congruence.
+    clear Hu Hv Kt Ku.
+    revert us K Ou. induction ts as [| [a b] ts IH];
+      intros [| [a' b'] us] K Ou; simpl in *; try discriminate;
+      [reflexivity |].
+    injection K as <- K. apply andb_true_intro. split.
+    + apply IH2; [eapply Ot; left; reflexivity | eapply Ou; left; reflexivity].
+    + apply IH.
+      * intros a' b'' Hin. eapply Ot. right. exact Hin.
+      * exact K.
+      * intros a' b'' Hin. eapply Ou. right. exact Hin.
+Qed.
+
+Lemma ajoin_right : forall A (u v : aval A),
+  In u (enum A) -> In v (enum A) -> aleb v (ajoin u v) = true.
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros u v Hu Hv.
+  - destruct (enum_nat_inv _ Hu) as [-> | ->];
+      destruct (enum_nat_inv _ Hv) as [-> | ->]; reflexivity.
+  - destruct (enum_arrow_inv _ _ _ Hu) as (ts & -> & Kt & Ot & _).
+    destruct (enum_arrow_inv _ _ _ Hv) as (us & -> & Ku & Ou & _).
+    simp ajoin aleb. assert (K : map fst ts = map fst us) by congruence.
+    clear Hu Hv Kt Ku.
+    revert us K Ou. induction ts as [| [a b] ts IH];
+      intros [| [a' b'] us] K Ou; simpl in *; try discriminate;
+      [reflexivity |].
+    injection K as <- K. apply andb_true_intro. split.
+    + apply IH2; [eapply Ot; left; reflexivity | eapply Ou; left; reflexivity].
+    + apply IH.
+      * intros a' b'' Hin. eapply Ot. right. exact Hin.
+      * exact K.
+      * intros a' b'' Hin. eapply Ou. right. exact Hin.
+Qed.
+
+Lemma ajoin_least : forall A (u v w : aval A),
+  In u (enum A) -> In v (enum A) -> In w (enum A) ->
+  aleb u w = true -> aleb v w = true -> aleb (ajoin u v) w = true.
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros u v w Hu Hv Hw Euw Evw.
+  - dependent elimination u. dependent elimination v. dependent elimination w.
+    simp ajoin aleb in *. destruct b, b0, b1; simpl in *; congruence.
+  - destruct (enum_arrow_inv _ _ _ Hu) as (ts & -> & Kt & Ot & _).
+    destruct (enum_arrow_inv _ _ _ Hv) as (us & -> & Ku & Ou & _).
+    destruct (enum_arrow_inv _ _ _ Hw) as (ws & -> & Kw & Ow & _).
+    simp ajoin aleb in *. assert (Ktu : map fst ts = map fst us) by congruence.
+    assert (Ktw : map fst ts = map fst ws) by congruence.
+    clear Hu Hv Hw Kt Ku Kw.
+    revert us ws Ktu Ktw Ou Ow Euw Evw.
+    induction ts as [| [a b] ts IH];
+      intros [| [a' b'] us] [| [a'' c] ws] Ktu Ktw Ou Ow Euw Evw;
+      simpl in *; try discriminate; [reflexivity |].
+    injection Ktu as <- Ktu. injection Ktw as <- Ktw.
+    apply andb_prop in Euw as [Euw Euwt].
+    apply andb_prop in Evw as [Evw Evwt].
+    apply andb_true_intro. split.
+    + apply IH2 with (w := c); try assumption.
+      * eapply Ot; left; reflexivity.
+      * eapply Ou; left; reflexivity.
+      * eapply Ow; left; reflexivity.
+    + apply IH.
+      * intros a' d Hin. eapply Ot. right. exact Hin.
+      * exact Ktu.
+      * exact Ktw.
+      * intros a' d Hin. eapply Ou. right. exact Hin.
+      * intros a' d Hin. eapply Ow. right. exact Hin.
+      * exact Euwt.
+      * exact Evwt.
+Qed.
+
+(** The representation-specific simultaneous argument used to establish
+    closure at arrow types. Once closure is known, the public monotonicity
+    theorem below is an instance of generic join theory. *)
+Local Lemma ajoin_mono_rows : forall A (u1 u2 v1 v2 : aval A),
+  In u1 (enum A) -> In u2 (enum A) ->
+  In v1 (enum A) -> In v2 (enum A) ->
+  aleb u1 u2 = true -> aleb v1 v2 = true ->
+  aleb (ajoin u1 v1) (ajoin u2 v2) = true.
+Proof.
+  induction A as [| A1 _ A2 IH2];
+    intros u1 u2 v1 v2 Hu1 Hu2 Hv1 Hv2 Eu Ev.
+  - dependent elimination u1. dependent elimination u2.
+    dependent elimination v1. dependent elimination v2.
+    simp ajoin aleb in *. destruct b, b0, b1, b2; simpl in *; congruence.
+  - destruct (enum_arrow_inv _ _ _ Hu1) as (ts1 & -> & Kt1 & Ot1 & _).
+    destruct (enum_arrow_inv _ _ _ Hu2) as (ts2 & -> & Kt2 & Ot2 & _).
+    destruct (enum_arrow_inv _ _ _ Hv1) as (us1 & -> & Ku1 & Ou1 & _).
+    destruct (enum_arrow_inv _ _ _ Hv2) as (us2 & -> & Ku2 & Ou2 & _).
+    simp ajoin aleb in *.
+    assert (K1 : map fst ts1 = map fst us1) by congruence.
+    assert (K2 : map fst ts2 = map fst us2) by congruence.
+    assert (K12 : map fst ts1 = map fst ts2) by congruence.
+    clear Hu1 Hu2 Hv1 Hv2 Kt1 Kt2 Ku1 Ku2.
+    revert ts2 us1 us2 K1 K2 K12 Ot2 Ou1 Ou2 Eu Ev.
+    induction ts1 as [| [a b1] ts1 IH];
+      intros [| [a2 b2] ts2] [| [a1 c1] us1] [| [a3 c2] us2]
+        K1 K2 K12 Ot2 Ou1 Ou2 Eu Ev;
+      simpl in *; try discriminate; [reflexivity |].
+    injection K1 as <- K1. injection K2 as <- K2. injection K12 as <- K12.
+    apply andb_prop in Eu as [Eu Eut]. apply andb_prop in Ev as [Ev Evt].
+    apply andb_true_intro. split.
+    + apply IH2; try assumption.
+      * eapply Ot1; left; reflexivity.
+      * eapply Ot2; left; reflexivity.
+      * eapply Ou1; left; reflexivity.
+      * eapply Ou2; left; reflexivity.
+    + apply IH.
+      * intros a' d Hin. eapply Ot1. right. exact Hin.
+      * exact K1.
+      * exact K2.
+      * exact K12.
+      * intros a' d Hin. eapply Ot2. right. exact Hin.
+      * intros a' d Hin. eapply Ou1. right. exact Hin.
+      * intros a' d Hin. eapply Ou2. right. exact Hin.
+      * exact Eut.
+      * exact Evt.
+Qed.
+
+Lemma ajoin_enum : forall A (u v : aval A),
+  In u (enum A) -> In v (enum A) -> In (ajoin u v) (enum A).
+Proof.
+  induction A as [| A1 _ A2 IH2]; intros u v Hu Hv.
+  - destruct (enum_nat_inv _ Hu) as [-> | ->];
+      destruct (enum_nat_inv _ Hv) as [-> | ->]; simpl; auto.
+  - destruct (enum_arrow_inv _ _ _ Hu) as (ts & -> & Kt & Ot & Mt).
+    destruct (enum_arrow_inv _ _ _ Hv) as (us & -> & Ku & Ou & Mu).
+    assert (K : map fst ts = map fst us) by congruence.
+    simp ajoin. apply in_map_iff. exists (join_tables (@ajoin A2) ts us).
+    split; [reflexivity |]. apply filter_In. split.
+    + apply all_tables_complete.
+      * rewrite join_tables_keys; [exact Kt | exact K].
+      * intros a d Hin.
+        destruct (join_tables_row _ _ _ ts us a d K Hin)
+          as (b & c & Hb & Hc & ->).
+        apply IH2; eauto.
+    + unfold monotone_tbl. rewrite forallb_forall. intros [a d] Hd.
+      rewrite forallb_forall. intros [a' d'] Hd'.
+      destruct (join_tables_row _ _ _ ts us a d K Hd)
+        as (b & c & Hb & Hc & ->).
+      destruct (join_tables_row _ _ _ ts us a' d' K Hd')
+        as (b' & c' & Hb' & Hc' & ->).
+      simpl. destruct (aleb a a') eqn:Eaa; [| reflexivity].
+      apply (ajoin_mono_rows A2 b b' c c'); try eauto.
+      * unfold monotone_tbl in Mt. rewrite forallb_forall in Mt.
+        specialize (Mt _ Hb). rewrite forallb_forall in Mt.
+        specialize (Mt _ Hb'). simpl in Mt. rewrite Eaa in Mt. exact Mt.
+      * unfold monotone_tbl in Mu. rewrite forallb_forall in Mu.
+        specialize (Mu _ Hc). rewrite forallb_forall in Mu.
+        specialize (Mu _ Hc'). simpl in Mu. rewrite Eaa in Mu. exact Mu.
+Qed.
+
+(** Having discharged the table representation obligations, package [ajoin]
+    once. All laws below are specializations of FiniteOrder.v. *)
+Definition aval_join_semilat (A : ty) : join_semilat (aval A).
+Proof.
+  refine {| join_base := aval_poset A; join_op := ajoin |}; cbn.
+  - apply ajoin_enum.
+  - apply ajoin_left.
+  - apply ajoin_right.
+  - apply ajoin_least.
+Defined.
+
+Definition aval_bounded_join_semilat (A : ty) : bounded_join_semilat (aval A).
+Proof.
+  refine {| bounded_join_base := aval_join_semilat A;
+            order_bottom := abot A |}; cbn.
+  - apply abot_enum.
+  - apply abot_least.
+Defined.
+
+Lemma ajoin_mono : forall A (u1 u2 v1 v2 : aval A),
+  In u1 (enum A) -> In u2 (enum A) ->
+  In v1 (enum A) -> In v2 (enum A) ->
+  aleb u1 u2 = true -> aleb v1 v2 = true ->
+  aleb (ajoin u1 v1) (ajoin u2 v2) = true.
+Proof.
+  intros A u1 u2 v1 v2 Hu1 Hu2 Hv1 Hv2 Eu Ev.
+  exact (join_mono _ (aval_join_semilat A) _ _ _ _
+    Hu1 Hu2 Hv1 Hv2 Eu Ev).
+Qed.
+
+(** The derived join algebra, carrier-scoped (arbitrary raw tables need not
+    have aligned keys). Nothing below is used by the soundness development —
+    it is the exported equational theory of the abstract domain, kept so
+    that a client (e.g. a richer analysis) finds the semilattice ready-made. *)
+Lemma ajoin_le_iff : forall A (u v w : aval A),
+  In u (enum A) -> In v (enum A) -> In w (enum A) ->
+  aleb (ajoin u v) w = true <->
+    aleb u w = true /\ aleb v w = true.
+Proof.
+  intros A u v w Hu Hv Hw.
+  exact (join_le_iff _ (aval_join_semilat A) _ _ _ Hu Hv Hw).
+Qed.
+
+Lemma ajoin_idem : forall A (u : aval A),
+  In u (enum A) -> ajoin u u = u.
+Proof.
+  intros A u Hu. exact (join_idem _ (aval_join_semilat A) _ Hu).
+Qed.
+
+Lemma ajoin_comm : forall A (u v : aval A),
+  In u (enum A) -> In v (enum A) -> ajoin u v = ajoin v u.
+Proof.
+  intros A u v Hu Hv. exact (join_comm _ (aval_join_semilat A) _ _ Hu Hv).
+Qed.
+
+Lemma ajoin_assoc : forall A (u v w : aval A),
+  In u (enum A) -> In v (enum A) -> In w (enum A) ->
+  ajoin (ajoin u v) w = ajoin u (ajoin v w).
+Proof.
+  intros A u v w Hu Hv Hw.
+  exact (join_assoc _ (aval_join_semilat A) _ _ _ Hu Hv Hw).
+Qed.
+
+Lemma ajoin_bot_l : forall A (u : aval A),
+  In u (enum A) -> ajoin (abot A) u = u.
+Proof.
+  intros A u Hu.
+  exact (join_bottom_l _ (aval_bounded_join_semilat A) _ Hu).
+Qed.
+
+Lemma ajoin_bot_r : forall A (u : aval A),
+  In u (enum A) -> ajoin u (abot A) = u.
+Proof.
+  intros A u Hu.
+  exact (join_bottom_r _ (aval_bounded_join_semilat A) _ Hu).
+Qed.
+
+(** ** The carrier is no bigger than the budget *)
+
+Lemma flat_map_const_length : forall (X Y : Type) (f : X -> list Y) l n,
+  (forall x, In x l -> length (f x) = n) ->
+  length (flat_map f l) = length l * n.
+Proof.
+  induction l as [| h t IH]; intros n Hn; simpl; [reflexivity |].
+  rewrite length_app, (Hn h (or_introl eq_refl)), (IH n); auto.
+  intros x Hx. apply Hn. right. exact Hx.
+Qed.
+
+Lemma all_tables_length : forall (I O : Type) (ins : list I) (outs : list O),
+  length (all_tables ins outs) = length outs ^ length ins.
+Proof.
+  intros I O. induction ins as [| i ins' IH]; intros outs; simpl; [reflexivity |].
+  rewrite (flat_map_const_length _ _ _ _ (length (all_tables ins' outs)));
+    [| intros; apply length_map].
+  rewrite IH. reflexivity.
+Qed.
+
+Lemma enum_nonempty : forall A, enum A <> [].
+Proof.
+  intros A E. pose proof (abot_enum A) as H. rewrite E in H. exact H.
+Qed.
+
+Lemma enum_le_dsize : forall A, length (enum A) <= dsize A.
+Proof.
+  induction A as [| A1 IH1 A2 IH2]; simpl; [lia |].
+  rewrite length_map.
+  eapply Nat.le_trans; [apply filter_length_le |].
+  rewrite all_tables_length.
+  apply Nat.pow_le_mono; [| exact IH2 | exact IH1].
+  pose proof (enum_nonempty A2).
+  destruct (enum A2); [congruence | simpl; lia].
+Qed.

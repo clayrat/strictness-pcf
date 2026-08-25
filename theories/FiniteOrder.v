@@ -352,7 +352,7 @@ Proof.
       * pose proof (upper_size_strict X O x (f x) Hx Hfx Hrise Hne). lia.
 Qed.
 
-Theorem finite_iter_receipt : forall X (O : finite_poset X)
+Theorem finite_iter_is_fixpoint : forall X (O : finite_poset X)
     (f : X -> X) bottom budget,
   finite_closed O f -> finite_monotone O f ->
   In bottom (finite_carrier O) ->

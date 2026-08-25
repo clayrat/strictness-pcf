@@ -16,11 +16,12 @@
     What is *not* here matters as much: nothing rules out [Timeout] forever.
     [omega] is well typed and diverges; safety promises it will diverge
     without getting stuck. The step relation is also deterministic
-    ([Semantics.cbn_deterministic]). *)
+    ([OperationalSemantics.cbn_deterministic]). *)
 
 From Stdlib Require Import String List.
 Import ListNotations.
-From PCF Require Import Ty Syntax Context Typing Subst Semantics Checker.
+From PCF Require Import Ty Syntax Context Typing Subst OperationalSemantics
+                        Checker.
 
 Open Scope string_scope.
 Open Scope pcf_scope.

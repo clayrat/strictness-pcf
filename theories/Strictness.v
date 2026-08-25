@@ -69,25 +69,27 @@
     — the computable shadow of ⊔ fⁿ(⊥). No convergence test is needed:
     an ascending chain in the monotone carrier, which has at most [dsize A]
     elements (an overcount — it bounds *all* maps), has stabilized after
-    [dsize A] steps. This receipt is a *theorem*: Stabilization.v proves
-    that for every functional in the enumerated carrier the budgeted
-    iteration returns a genuine fixpoint ([afix_receipt]) and indeed the
-    least one ([afix_least]) — pure finite order theory, no semantics.
-    [AnalysisCorrectness.v] proves that [aeval] only ever builds values inside
-    the carrier and is monotone in ordered abstract environments. What remains
-    unproved is the operational semantic soundness connecting ⊥-verdicts to
-    [evalFuel]-divergence — see Stabilization.v's header for the honest map.
+    [dsize A] steps. Stabilization.v proves that for every functional in the
+    enumerated carrier this bounded iteration returns a genuine fixpoint
+    ([afix_approx_is_fixpoint]) and indeed the least one ([afix_least]) — pure
+    finite order theory, no semantics.
+    [AnalysisProperties.v] proves that [aeval] only ever builds values inside
+    the carrier and is monotone in ordered abstract environments.
+    [LogicalRelation.v] defines the step-indexed operational relation, while
+    [AnalysisSoundness.v] proves the fundamental theorem connecting checked
+    terms to the abstract values computed by [aeval] and derives soundness of
+    [certified_strict].
     Contrast [evalFuel]:
     same iteration shape, but there the domain is infinite and fuel is a
-    confession; here the domain is finite and [dsize] is a receipt.
+    confession; here the domain is finite and [dsize] is proved sufficient.
 
     ** The contract, in its direct form
 
     If [f♯(⊥) = ⊥] then [f] is strict — the analysis answers ⊥ only when
     it is sure. ⊤ means *unknown*, compatible with both strictness and
-    non-strictness. There is currently no general operational soundness theorem
-    in this development; what Tests.v does instead
-    is certify the demo instances operationally: the functions the analysis
+    non-strictness. [certified_strict_sound] in AnalysisSoundness.v proves this
+    contract for every accepted first-order function. Tests.v also certifies
+    the demo instances operationally: the functions the analysis
     calls strict really do diverge on a diverging argument, and the one it
     is blind about ([blind = λx. loop 0]) really is strict — the blindness
     is the abstraction's, not the analyser's bug. The analysis is

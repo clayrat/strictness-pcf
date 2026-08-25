@@ -16,8 +16,10 @@
 
 From Stdlib Require Import String List Lia.
 Import ListNotations.
-From PCF Require Import Ty Syntax Context Typing Checker Subst Semantics
-                        Safety Strictness Examples.
+From PCF Require Import Ty Syntax Context Typing Checker Subst
+                        OperationalSemantics Safety Strictness Stabilization
+                        AnalysisProperties LogicalRelation AnalysisSoundness
+                        Examples.
 
 Open Scope string_scope.
 Open Scope pcf_scope.
@@ -308,6 +310,14 @@ Proof. intros A n. apply omega_at_loop. Qed.
 
 Theorem omega_diverges : forall n, evalFuel n omega = Timeout.
 Proof. apply omega_at_diverges. Qed.
+
+(** The logical relation packages exactly the same universal observation as
+    natural bottom. *)
+Corollary omega_related_bottom : semantic_rel (AN false) omega.
+Proof.
+  apply (proj2 (semantic_nat_bottom_iff omega)).
+  unfold diverges. apply omega_diverges.
+Qed.
 
 (** *** The flagship: fuel two
 
@@ -687,9 +697,9 @@ Proof. reflexivity. Qed.
     function given pointwise on the two-point domain.
 
     Alongside each verdict the analysis is *held to account* operationally.
-    The general operational soundness theorem is not yet proved, so every
-    "certified strict" example below comes with a proof that the function
-    really diverges on a diverging argument. *)
+    The direct proofs below remain useful independent regressions for the
+    concrete programs, while [certified_strict_sound] supplies the general
+    result for every positive certificate. *)
 
 (** *** The headline pair
 
@@ -753,9 +763,9 @@ Example recursive_verdicts :
   certified_strict fact = true /\ certified_strict slow = true.
 Proof. split; reflexivity. Qed.
 
-(** One unfolding exposes the strict [ifz] scrutinee. This is enough to hold
-    both positive analysis verdicts above accountable without appealing to
-    the unformalized general soundness theorem. *)
+(** One unfolding exposes the strict [ifz] scrutinee. This gives direct
+    operational proofs for both positive verdicts above, independently of the
+    general certificate theorem. *)
 Lemma fact_unfold : forall a,
   fact · a -->* (ifz a then # 1 else mul · a · (fact · tpred a)).
 Proof.
@@ -877,8 +887,8 @@ Qed.
 
 (** *** Why the carrier is the *monotone* tables
 
-    The stabilization receipt — [dsize A] iterations suffice — is an
-    argument about ascending chains, and a non-monotone table voids it: on
+    The proof that [dsize A] iterations suffice is an argument about ascending
+    chains, and a non-monotone table invalidates it: on
     {⊥↦⊤, ⊤↦⊥} the iteration oscillates forever, and [afix_approx] at
     [dsize ℕ = 2] returns a non-fixpoint. Frozen as a negative demo: *)
 
@@ -899,7 +909,7 @@ Proof. repeat split; reflexivity. Qed.
 
     The positive counterpart is now a theorem, not a slogan: for every
     functional *in* the carrier the budgeted iteration reaches a genuine
-    fixpoint, and the least one ([Stabilization.afix_receipt],
+    fixpoint, and the least one ([Stabilization.afix_approx_is_fixpoint],
     [Stabilization.afix_least]) — the oscillation above is precisely what
     happens outside its hypothesis. *)
 
@@ -997,6 +1007,43 @@ Proof. reflexivity. Qed.
 Theorem blind_strict_op : forall n, evalFuel n (blind · omega) = Timeout.
 Proof. destruct n as [| n]; [reflexivity | exact (proj1 (loop0_loop n))]. Qed.
 
+(** *** The general theorem instantiated
+
+    [certified_strict_sound] turns each frozen [certified_strict _ = true]
+    verdict above into a ∀-statement — divergence on *every* well-typed
+    diverging argument, not only on the Ω of the hand-made loops. The
+    [reflexivity] discharges the Boolean premise by running the checker and
+    the analyser inside the proof; fixpoint stabilization, analyser properties,
+    the step-indexed relation, and the fundamental theorem compose invisibly
+    behind it. *)
+
+Corollary strict_succ_strict_sem : forall u,
+  [] ⊢ u ∈ ℕ -> diverges u -> diverges (strict_succ · u).
+Proof. apply certified_strict_sound. reflexivity. Qed.
+
+Corollary loop_strict_sem : forall u,
+  [] ⊢ u ∈ ℕ -> diverges u -> diverges (loop · u).
+Proof. apply certified_strict_sound. reflexivity. Qed.
+
+Corollary fact_strict_sem : forall u,
+  [] ⊢ u ∈ ℕ -> diverges u -> diverges (fact · u).
+Proof. apply certified_strict_sound. reflexivity. Qed.
+
+(** The hand-made certificates above become the Ω-instances of these. *)
+Example strict_succ_omega_inst : forall n,
+  evalFuel n (strict_succ · omega) = Timeout.
+Proof.
+  exact (strict_succ_strict_sem omega omega_typed (omega_at_diverges ℕ)).
+Qed.
+
+(** And the exact boundary of the theorem, stated by its silence: for
+    [blind] the Boolean premise is *false* ([conservativity_verdicts]), so
+    the certificate theorem asserts nothing about it — yet [blind] is
+    semantically strict ([blind_strict_op] above). The gap between "certified"
+    and "true" is
+    the information the two-point domain forgot, now visible as the
+    difference between a derivable corollary and a hand-made induction. *)
+
 (** *** The complete implemented pipeline
 
     The three algorithms in one line each, all previously proved or frozen:
@@ -1008,3 +1055,19 @@ Proof. destruct n as [| n]; [reflexivity | exact (proj1 (loop0_loop n))]. Qed.
     on Ω. What was lost in 𝔻 = {⊥ ≤ ⊤} is exactly what [blind] needed:
     which number the computation was defined *at*. That loss is also why
     the analysis halts — a finite domain is exhaustible, ℕ_⊥ is not. *)
+
+(** The public soundness theorem and all of its dependencies are axiom-free. *)
+(** ** Axiom audit
+
+    One [Print Assumptions] per headline theorem of the development, so any
+    accidental axiom shows up in the build log. Each must report "Closed
+    under the global context". *)
+
+Print Assumptions algo_sound.             (* checker soundness *)
+Print Assumptions check_eval_contract.    (* checked programs do not get stuck *)
+Print Assumptions cbn_deterministic.      (* deterministic small-step evaluation *)
+Print Assumptions slow_total.             (* inductive totality proof *)
+Print Assumptions afix_approx_is_fixpoint. (* finite iteration reaches a fixpoint *)
+Print Assumptions checked_fix_is_fixpoint. (* the result for checked programs *)
+Print Assumptions logical_fundamental.    (* analysis fundamental theorem *)
+Print Assumptions certified_strict_sound. (* public certificate soundness *)

@@ -7,10 +7,13 @@ theories/Context.v
 theories/Typing.v
 theories/Checker.v
 theories/Subst.v
-theories/Semantics.v
+theories/OperationalSemantics.v
 theories/Safety.v
 theories/Strictness.v
+theories/AbstractDomain.v
 theories/Stabilization.v
-theories/AnalysisCorrectness.v
+theories/AnalysisProperties.v
+theories/LogicalRelation.v
+theories/AnalysisSoundness.v
 theories/Examples.v
 theories/Tests.v
