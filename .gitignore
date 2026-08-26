@@ -18,3 +18,5 @@
 extraction/pcf.ml
 extraction/pcf.mli
 extraction/_build/
+*.cmi
+*.cmo
