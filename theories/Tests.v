@@ -265,9 +265,14 @@ Proof. apply check_program, fact_checks. Qed.
 
 (** *** The factorial computes
 
-    ~3600 CBN steps for [3! = 6] — call-by-name re-evaluates duplicated
+    More than 2000 CBN steps for [3! = 6] — call-by-name re-evaluates duplicated
     arguments, and nothing is shared. The relevant theorem is safety, not
     efficiency. *)
+
+(** Insufficient fuel observes only a timeout; it does not establish that the
+    factorial diverges. More fuel separates this run from [omega]. *)
+Example fact_short_timeout : evalFuel 1000 (fact · # 3) = Timeout.
+Proof. reflexivity. Qed.
 
 Example fact_runs : evalFuel 5000 (fact · # 3) = Value (# 6).
 Proof. reflexivity. Qed.

@@ -552,6 +552,7 @@ let run_examples () =
     (infer [] ex_apply_to_three
      = Err (E_Mismatch (Tnum 3, nn, Tnat)));
   assert (infer [] (Tvar "y") = Err (E_Unbound "y"));
+  assert (evalFuel 1000 (Tapp (fact, Tnum 3)) = Timeout);
   assert (evalFuel 5000 (Tapp (fact, Tnum 3)) = Value (Tnum 6));
   assert (evalFuel 5000 omega = Timeout);
   assert (evalFuel 2 cbn_flagship = Value (Tnum 0));
@@ -582,6 +583,7 @@ let run_examples () =
   show_infer "y" (Tvar "y");
 
   print_endline "\nCall-by-name evaluation:";
+  show_eval "fact 3" 1000 (Tapp (fact, Tnum 3));
   show_eval "fact 3" 5000 (Tapp (fact, Tnum 3));
   show_eval "omega" 5000 omega;
   show_eval "(fun x -> 0) omega" 2 cbn_flagship;
