@@ -491,12 +491,67 @@ let rec pp_aval = function
            table)
       ^ "}"
 
+let pp_error = function
+  | E_Unbound x -> "unbound variable " ^ x
+  | E_NoSynth t -> "cannot synthesize a type for " ^ pp_term t
+  | E_NotFun (t, actual) ->
+      pp_term t ^ " has type " ^ pp_ty actual ^ " and is not a function"
+  | E_LamNotFun (t, expected) ->
+      pp_term t ^ " is a function, but " ^ pp_ty expected ^ " was expected"
+  | E_Mismatch (t, expected, actual) ->
+      pp_term t ^ ": expected " ^ pp_ty expected ^ ", got " ^ pp_ty actual
+
+let pp_infer t =
+  match infer [] t with
+  | Ok ty -> "Ok " ^ pp_ty ty
+  | Err error -> "Error: " ^ pp_error error
+
+let pp_check t expected =
+  match check [] t expected with
+  | Ok () -> "Ok"
+  | Err error -> "Error: " ^ pp_error error
+
+let show_infer label t =
+  Printf.printf "  infer %-31s ~> %s\n" label (pp_infer t)
+
+let show_check label t expected =
+  Printf.printf "  check %-20s : %-8s ~> %s\n"
+    label (pp_ty expected) (pp_check t expected)
+
+let pp_eval_result = function
+  | Value value -> pp_term value
+  | Timeout -> "timeout"
+  | Stuck stuck -> "stuck at " ^ pp_term stuck
+
+let show_eval label fuel t =
+  Printf.printf "  eval %-5d %-25s ~> %s\n"
+    fuel label (pp_eval_result (evalFuel fuel t))
+
+let show_strict label t =
+  Printf.printf "  certified_strict %-18s ~> %b\n"
+    label (certified_strict t)
+
 let run_examples () =
   let nn = Tarr (Tnat, Tnat) in
+  let simple_ifz = Tifz (Tnum 0, Tnum 1, Tnum 2) in
   assert (infer [] fact = Ok nn);
+  assert (check [] fact nn = Ok ());
+  assert (infer [] ex_id = Err (E_NoSynth ex_id));
+  assert (check [] ex_id nn = Ok ());
   assert (infer [] omega = Ok Tnat);
-  assert (check [] omega_untyped Tnat <> Ok ());
+  assert (infer [] omega_untyped = Err (E_NoSynth delta));
+  assert (check [] delta nn = Err (E_NotFun (Tvar "x", Tnat)));
   assert (infer [] ex_id_ann = Ok nn);
+  assert (infer [] simple_ifz = Err (E_NoSynth simple_ifz));
+  assert (check [] simple_ifz Tnat = Ok ());
+  assert (infer [] (Tann (simple_ifz, Tnat)) = Ok Tnat);
+  assert
+    (infer [] stuck_succ
+     = Err (E_LamNotFun (Tlam ("x", Tvar "x"), Tnat)));
+  assert
+    (infer [] ex_apply_to_three
+     = Err (E_Mismatch (Tnum 3, nn, Tnat)));
+  assert (infer [] (Tvar "y") = Err (E_Unbound "y"));
   assert (evalFuel 5000 (Tapp (fact, Tnum 3)) = Value (Tnum 6));
   assert (evalFuel 5000 omega = Timeout);
   assert (evalFuel 2 cbn_flagship = Value (Tnum 0));
@@ -509,19 +564,38 @@ let run_examples () =
   assert (not (certified_strict blind));
   assert (not (certified_strict omega));
   print_endline "Native PCF reference:";
-  Printf.printf "  fact 3       ~> %s\n"
-    (match evalFuel 5000 (Tapp (fact, Tnum 3)) with
-     | Value value -> pp_term value
-     | Timeout -> "timeout"
-     | Stuck stuck -> "stuck at " ^ pp_term stuck);
-  Printf.printf "  (fun x -> 0) omega, fuel 2 ~> %s\n"
-    (match evalFuel 2 cbn_flagship with
-     | Value value -> pp_term value
-     | Timeout -> "timeout"
-     | Stuck stuck -> "stuck at " ^ pp_term stuck);
+
+  print_endline "\nType checker (the executable cases from theories/Tests.v):";
+  show_check "fact" fact nn;
+  show_infer "fact" fact;
+  show_infer "omega" omega;
+  show_infer "untyped omega" omega_untyped;
+  show_check "delta" delta nn;
+  show_infer "fun x -> x" ex_id;
+  show_check "fun x -> x" ex_id nn;
+  show_infer "(fun x -> x : Nat -> Nat)" ex_id_ann;
+  show_infer "ifz 0 then 1 else 2" simple_ifz;
+  show_check "ifz 0 then 1 else 2" simple_ifz Tnat;
+  show_infer "(ifz 0 then 1 else 2 : Nat)" (Tann (simple_ifz, Tnat));
+  show_infer "succ (fun x -> x)" stuck_succ;
+  show_infer "(fun f -> f 0) 3" ex_apply_to_three;
+  show_infer "y" (Tvar "y");
+
+  print_endline "\nCall-by-name evaluation:";
+  show_eval "fact 3" 5000 (Tapp (fact, Tnum 3));
+  show_eval "omega" 5000 omega;
+  show_eval "(fun x -> 0) omega" 2 cbn_flagship;
+  show_eval "succ (fun x -> x)" 10 stuck_succ;
+
+  print_endline "\nStrictness analysis:";
   Printf.printf "  analyse fact ~> %s\n" (pp_aval (analyse fact nn));
-  Printf.printf "  strict(fact) ~> %b\n" (certified_strict fact);
-  Printf.printf "  strict(fun x -> 0) ~> %b\n" (certified_strict const_zero)
+  show_strict "fun x -> succ x" strict_succ;
+  show_strict "fun x -> 0" const_zero;
+  show_strict "fact" fact;
+  show_strict "slow" slow;
+  show_strict "loop" loop;
+  show_strict "blind" blind;
+  show_strict "omega" omega
 
 (* As in [nbe_native.ml], loading with [#mod_use] has no side effect. *)
 let () =
