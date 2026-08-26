@@ -503,20 +503,20 @@ let pp_error = function
 
 let pp_infer t =
   match infer [] t with
-  | Ok ty -> "Ok " ^ pp_ty ty
+  | Ok ty -> "type " ^ pp_ty ty
   | Err error -> "Error: " ^ pp_error error
 
 let pp_check t expected =
   match check [] t expected with
-  | Ok () -> "Ok"
+  | Ok () -> "accepted"
   | Err error -> "Error: " ^ pp_error error
 
 let show_infer label t =
-  Printf.printf "  infer %-31s ~> %s\n" label (pp_infer t)
+  Printf.printf "  %-39s ~> %s\n" ("infer " ^ label) (pp_infer t)
 
 let show_check label t expected =
-  Printf.printf "  check %-20s : %-8s ~> %s\n"
-    label (pp_ty expected) (pp_check t expected)
+  let query = "check " ^ label ^ " : " ^ pp_ty expected in
+  Printf.printf "  %-39s ~> %s\n" query (pp_check t expected)
 
 let pp_eval_result = function
   | Value value -> pp_term value
